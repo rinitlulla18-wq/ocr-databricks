@@ -7,3 +7,5 @@ env:
   value: "/Volumes/corp_enit_sandbox_catalog/data_classification_poc/data/"
 - name: "DATABRICKS_DELTA_TABLE_PATH"
   value: "corp_enit_sandbox_catalog.data_classification_poc.doc_results"
+- name: "BATCH_INPUT_VOLUME_PATH"
+  value: "/Volumes/corp_enit_sandbox_catalog/data_classification_poc/data/"
