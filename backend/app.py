@@ -1635,16 +1635,22 @@ def summarize_document(request: SummarizeDocumentRequest):
         if not full_text.strip():
             return {"success": False, "message": "Document text is empty"}
 
-        # Truncate to avoid token limits
-        truncated = full_text[:6000] if len(full_text) > 6000 else full_text
-
-        prompt = f"Summarize the following document content in 4-6 sentences. Focus on the key topics, main findings or information, and purpose of the document. Be concise and informative:\\n\\n{truncated}"
-        escaped_prompt = prompt.replace("'", "\\'")
-
+        # Use CONCAT in SQL so document text never needs SQL escaping
         summary_query = f"""
         SELECT ai_query(
             'databricks-meta-llama-3-3-70b-instruct',
-            '{escaped_prompt}'
+            CONCAT(
+                'Summarize this document in 4-6 sentences. Focus on key topics, main findings, and purpose. Be concise and informative:\\n\\n',
+                LEFT(
+                    (SELECT concat_ws(' ', collect_list(content))
+                     FROM IDENTIFIER('{destination_table}')
+                     WHERE path IN ({dbfs_paths_list})
+                       AND type NOT IN ('figure', 'page_header', 'page_footer')
+                       AND content IS NOT NULL
+                       AND length(content) > 10),
+                    6000
+                )
+            )
         ) as summary
         """
 
@@ -1662,13 +1668,11 @@ def summarize_document(request: SummarizeDocumentRequest):
 
 
 # Mount static files for Next.js assets (_next directory, favicon, etc.)
-# Use absolute path in Databricks Apps environment
-if os.path.exists("/Workspace/Users/q.yu@databricks.com/databricks_apps/document-intelligence/static"):
-    target_dir = "/Workspace/Users/q.yu@databricks.com/databricks_apps/document-intelligence/static"
-elif os.path.exists("/Workspace/Users/q.yu@databricks.com/databricks_apps/document-intelligence/static"):
-    target_dir = "/Workspace/Users/q.yu@databricks.com/databricks_apps/document-intelligence/static"
+# Prefer STATIC_FILES_PATH env var, then app.yaml config, then fallback to "static"
+_env_static = os.environ.get('STATIC_FILES_PATH', '') or YAML_CONFIG.get('STATIC_FILES_PATH', '')
+if _env_static and os.path.exists(_env_static):
+    target_dir = _env_static
 else:
-    # Fallback for local development
     target_dir = "static"
 
 print(f"📁 Serving static files from: {target_dir}")

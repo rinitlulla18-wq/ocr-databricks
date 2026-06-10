@@ -150,6 +150,10 @@ export default function DocumentIntelligencePage() {
     // Copy confirmation state per element
     const [copiedElementId, setCopiedElementId] = useState<string | null>(null);
 
+    // Live OCR elapsed timer (seconds since OCR started)
+    const [ocrElapsed, setOcrElapsed] = useState<number>(0);
+    const ocrTimerRef = useRef<NodeJS.Timeout | null>(null);
+
     // Search within extracted results
     const [resultSearch, setResultSearch] = useState('');
 
@@ -481,9 +485,23 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
 
     const writeToDeltaTable = async (filePaths: string[]) => {
         try {
-            setDeltaTableError(null); // Clear previous errors
-            setDeltaTableLoading(true); // Show loading state
+            setDeltaTableError(null);
+            setDeltaTableLoading(true);
             setProcessingStats(null);
+            // Reset per-session UI state for fresh document
+            setResultSearch('');
+            setElementTypeFilter('all');
+            setSummaryText(null);
+            setSummaryError(null);
+            setShowSummaryPanel(false);
+            setOcrElapsed(0);
+
+            // Start live elapsed timer
+            if (ocrTimerRef.current) clearInterval(ocrTimerRef.current);
+            ocrTimerRef.current = setInterval(() => {
+                setOcrElapsed(prev => prev + 1);
+            }, 1000);
+
             const ocrStartTime = Date.now();
             console.log("Starting write operation for:", filePaths);
             
@@ -508,7 +526,7 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
             setProcessedSessionFiles(filePaths);
             setShowDeltaTableResults(true);
             setDeltaTableResults([]);
-            setDeltaTableError("Processing document... This may take 1-2 minutes for large files.");
+            setDeltaTableError("__PROCESSING__");
             
             console.log("Starting polling for results...");
             
@@ -517,6 +535,7 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                 const maxAttempts = 30; // 5 minutes of polling (30 * 10 seconds)
                 
                 if (attemptCount >= maxAttempts) {
+                    if (ocrTimerRef.current) { clearInterval(ocrTimerRef.current); ocrTimerRef.current = null; }
                     setDeltaTableError("Processing is taking longer than expected. The operation may still be running in the background. Try refreshing in a few minutes.");
                     setDeltaTableLoading(false);
                     return;
@@ -540,6 +559,7 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                         setDeltaTableResults(queryResult.data);
                         setDeltaTableError(null);
                         setDeltaTableLoading(false);
+                        if (ocrTimerRef.current) { clearInterval(ocrTimerRef.current); ocrTimerRef.current = null; }
                         setProcessingStats({ ocrStartTime, ocrEndTime: Date.now() });
 
                         // Fetch page metadata after successful processing
@@ -595,80 +615,7 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
         }
     };
 
-    const OLD_handleWriteToDeltaTable_REMOVE = async () => {
-        // This is old code that should be removed
-        try {
-            const response = await apiCall("/api/write-to-delta-table", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                    file_paths: filePaths,
-                    limit: 10
-                })
-            });
-            
-            if (response.success && response.data) {
-                setDeltaTableResults(response.data);
-                setShowDeltaTableResults(true);
-                console.log(`Successfully processed ${response.data.length} table entries`);
-            } else {
-                // If the operation reports failure but we can see the UI shows table data,
-                // try to query the table directly as a fallback
-                console.log("Write operation reported failure, but checking if table has data...");
-                try {
-                    const queryResponse = await apiCall("/api/query-delta-table", {
-                        method: "POST",
-                        headers: {
-                            "Content-Type": "application/json"
-                        },
-                        body: JSON.stringify({
-                            file_paths: filePaths,
-                            limit: 10
-                        })
-                    });
-                    
-                    if (queryResponse.success && queryResponse.data && queryResponse.data.length > 0) {
-                        console.log(`Found ${queryResponse.data.length} table entries via fallback query`);
-                        setDeltaTableResults(queryResponse.data);
-                        setShowDeltaTableResults(true);
-                        // Clear error since we successfully recovered the data
-                        setDeltaTableError(null);
-                        // Log the warning to console instead of showing it as an error
-                        console.warn(`Write operation reported issues (${response.message}) but recovered ${queryResponse.data.length} existing table entries.`);
-                    } else {
-                        setDeltaTableError(response.message || "No data returned from operation");
-                        setDeltaTableResults([]);
-                    }
-                } catch (queryError) {
-                    console.error("Fallback query also failed:", queryError);
-                    setDeltaTableError(response.message || "No data returned from operation");
-                    setDeltaTableResults([]);
-                }
-            }
-            
-        } catch (error) {
-            console.error("Delta table write error:", error);
-            
-            // Handle timeout errors with user-friendly message
-            let errorMessage = error instanceof Error ? error.message : String(error);
-            if (errorMessage.includes('504') || errorMessage.includes('timeout') || errorMessage.includes('upstream request timeout')) {
-                errorMessage = "The operation is taking longer than expected. Large documents may need more time to process. Please be patient.";
-            } else if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
-                errorMessage = "There was a server error processing your document. Please check your file and configuration, then try again.";
-            } else if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
-                errorMessage = "Network error occurred. Please check your connection and try again.";
-            }
-            
-            setDeltaTableError(errorMessage);
-            setDeltaTableResults([]);
-        } finally {
-            setDeltaTableLoading(false);
-        }
-    };
-
-    // Fetch page metadata 
+    // Fetch page metadata
     const fetchPageMetadata = async (filePaths: string[]) => {
         if (filePaths.length === 0) {
             setPageMetadata(null);
@@ -907,6 +854,25 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
         }
 
         if (deltaTableError) {
+            if (deltaTableError === "__PROCESSING__") {
+                return (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-5 text-center space-y-3">
+                        <div className="flex items-center justify-center gap-2">
+                            <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                            <span className="font-semibold text-blue-700">OCR Processing...</span>
+                        </div>
+                        <div className="text-4xl font-mono font-bold text-blue-600">{ocrElapsed}s</div>
+                        <div className="text-sm text-blue-600">Databricks ai_parse_document is analyzing your document</div>
+                        <div className="w-full bg-blue-100 rounded-full h-2 overflow-hidden">
+                            <div
+                                className="bg-blue-500 h-2 rounded-full transition-all"
+                                style={{ width: `${Math.min((ocrElapsed / 120) * 100, 95)}%` }}
+                            />
+                        </div>
+                        <div className="text-xs text-blue-500">Typically takes 30–120 seconds · Polling for results every 10s</div>
+                    </div>
+                );
+            }
             return (
                 <div className="bg-red-50 border border-red-200 rounded p-3">
                     <div className="flex items-center mb-2">
@@ -2274,7 +2240,7 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                                         </div>
                                     )}
 
-                                    {deltaTableError && (
+                                    {deltaTableError && deltaTableError !== "__PROCESSING__" && (
                                         <div className="text-xs text-red-600 bg-red-50 p-2 rounded">
                                             {deltaTableError}
                                         </div>
@@ -2332,6 +2298,7 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                                 </CardTitle>
                                 <CardDescription>
                                     Select a page to view its elements and generate visualizations. Found {pageMetadata.total_pages} pages with {pageMetadata.total_elements || 0} total elements.
+                                    <span className="ml-2 text-xs text-purple-400">Tip: use ← → arrow keys to navigate pages</span>
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
@@ -2549,18 +2516,25 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                                     <p className="text-sm text-gray-500 text-center py-4">No processed documents found in delta table.</p>
                                 ) : (
                                     <div className="space-y-2 max-h-64 overflow-y-auto">
-                                        {historyFiles.map((f, i) => (
-                                            <button
-                                                key={i}
-                                                onClick={() => loadHistoricalDocument(f.path)}
-                                                className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-colors"
-                                            >
-                                                <div className="font-medium text-sm text-gray-800 truncate">{f.filename}</div>
-                                                <div className="text-xs text-gray-500 mt-1">
-                                                    {f.total_pages} pages · {f.total_elements} elements
-                                                </div>
-                                            </button>
-                                        ))}
+                                        {historyFiles.map((f, i) => {
+                                            const cleanName = f.filename || f.path.split('/').pop() || f.path;
+                                            const shortPath = f.path.replace('dbfs:', '').split('/').slice(0, -1).join('/').replace('/Volumes/', '').split('/').slice(0, 3).join('/');
+                                            return (
+                                                <button
+                                                    key={i}
+                                                    onClick={() => loadHistoricalDocument(f.path)}
+                                                    className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-colors"
+                                                >
+                                                    <div className="font-medium text-sm text-gray-800 truncate">{cleanName}</div>
+                                                    <div className="text-xs text-gray-500 mt-1">
+                                                        <span className="font-mono">{shortPath}</span>
+                                                    </div>
+                                                    <div className="text-xs text-gray-400 mt-0.5">
+                                                        {f.total_pages} pages · {f.total_elements} elements
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
                                     </div>
                                 )}
                             </CardContent>
