@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useState, useRef, useEffect } from 'react';
 import Link from "next/link";
-import { ArrowLeft, Upload, FileText, Database, Settings, AlertCircle, File, Eye, Play, Loader2, Lightbulb, Save, ChevronDown, ChevronRight, RefreshCw, Download, Copy, Check, Clock, Filter } from "lucide-react";
+import { ArrowLeft, Upload, FileText, Database, Settings, AlertCircle, File, Eye, Play, Loader2, Lightbulb, Save, ChevronDown, ChevronRight, RefreshCw, Download, Copy, Check, Clock, Filter, Search, Maximize2, Minimize2, BarChart2, History, Sparkles } from "lucide-react";
 import { apiCall } from "@/lib/api-config";
 import { FloatingTooltip } from "@/components/ui/floating-tooltip";
 
@@ -149,6 +149,24 @@ export default function DocumentIntelligencePage() {
 
     // Copy confirmation state per element
     const [copiedElementId, setCopiedElementId] = useState<string | null>(null);
+
+    // Search within extracted results
+    const [resultSearch, setResultSearch] = useState('');
+
+    // AI summary state
+    const [summaryLoading, setSummaryLoading] = useState(false);
+    const [summaryText, setSummaryText] = useState<string | null>(null);
+    const [summaryError, setSummaryError] = useState<string | null>(null);
+    const [showSummaryPanel, setShowSummaryPanel] = useState(false);
+
+    // Fullscreen visualization state
+    const [fullscreenPageId, setFullscreenPageId] = useState<string | null>(null);
+
+    // Document history state
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [historyFiles, setHistoryFiles] = useState<any[]>([]);
+    const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+    const [historyError, setHistoryError] = useState<string | null>(null);
 
     // Utility function to extract error message from various error types
     const getErrorMessage = (err: unknown): string => {
@@ -914,7 +932,25 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
         }
 
         const uniqueTypes = getUniqueElementTypes();
-        const filtered = elementTypeFilter === 'all' ? deltaTableResults : deltaTableResults.filter(r => (r.type || 'unknown') === elementTypeFilter);
+        const searchLower = resultSearch.toLowerCase().trim();
+        const searchFiltered = searchLower
+            ? deltaTableResults.filter(r =>
+                (r.content && r.content.toLowerCase().includes(searchLower)) ||
+                (r.description && r.description.toLowerCase().includes(searchLower)) ||
+                (r.type && r.type.toLowerCase().includes(searchLower))
+              )
+            : deltaTableResults;
+        const filtered = elementTypeFilter === 'all' ? searchFiltered : searchFiltered.filter(r => (r.type || 'unknown') === elementTypeFilter);
+
+        const highlightText = (text: string): React.ReactNode => {
+            if (!searchLower || !text) return text;
+            const parts = text.split(new RegExp(`(${searchLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
+            return parts.map((part, i) =>
+                part.toLowerCase() === searchLower
+                    ? <mark key={i} className="bg-yellow-200 rounded px-0.5">{part}</mark>
+                    : part
+            );
+        };
 
         return (
             <div className="space-y-4">
@@ -955,6 +991,52 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                     </div>
                 )}
 
+                {/* Search bar */}
+                <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                        type="text"
+                        placeholder="Search in extracted elements..."
+                        value={resultSearch}
+                        onChange={e => setResultSearch(e.target.value)}
+                        className="w-full pl-9 pr-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                    {resultSearch && (
+                        <button onClick={() => setResultSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">✕</button>
+                    )}
+                </div>
+
+                {/* Element type stats chart */}
+                {uniqueTypes.length > 0 && (
+                    <div className="p-3 bg-gray-50 rounded-lg border">
+                        <div className="flex items-center gap-2 mb-2">
+                            <BarChart2 className="h-4 w-4 text-gray-500" />
+                            <span className="text-xs font-semibold text-gray-600">Element Breakdown</span>
+                        </div>
+                        <div className="space-y-1.5">
+                            {uniqueTypes.map(t => {
+                                const count = deltaTableResults.filter(r => (r.type || 'unknown') === t).length;
+                                const pct = Math.round((count / deltaTableResults.length) * 100);
+                                const colors: Record<string, string> = {
+                                    table: 'bg-green-400', title: 'bg-red-400', section_header: 'bg-purple-400',
+                                    figure: 'bg-pink-400', page_header: 'bg-orange-400', page_footer: 'bg-orange-300',
+                                    text: 'bg-blue-400', caption: 'bg-cyan-400'
+                                };
+                                const color = colors[t] || 'bg-gray-400';
+                                return (
+                                    <div key={t} className="flex items-center gap-2 text-xs">
+                                        <span className="w-24 text-gray-600 truncate">{t}</span>
+                                        <div className="flex-1 bg-gray-200 rounded-full h-2">
+                                            <div className={`${color} h-2 rounded-full transition-all`} style={{ width: `${pct}%` }} />
+                                        </div>
+                                        <span className="w-10 text-right text-gray-500">{count} ({pct}%)</span>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                )}
+
                 {/* Filter by element type */}
                 {uniqueTypes.length > 1 && (
                     <div className="flex flex-wrap items-center gap-2">
@@ -977,7 +1059,8 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                 )}
 
                 <div className="text-sm text-gray-600">
-                    Showing {filtered.length}{elementTypeFilter !== 'all' ? ` ${elementTypeFilter}` : ''} elements from delta table: {deltaTablePathConfig.delta_table_path}
+                    Showing {filtered.length}{elementTypeFilter !== 'all' ? ` ${elementTypeFilter}` : ''}{searchLower ? ` matching "${resultSearch}"` : ''} elements
+                    {searchLower && filtered.length === 0 && <span className="ml-2 text-orange-500">— no matches found</span>}
                 </div>
                 {filtered.map((result, index) => (
                     <div key={index} className={`border rounded-lg p-5 shadow-sm hover:shadow-md transition-shadow ${
@@ -1056,26 +1139,23 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                                 // For figure elements, show only description
                                 <div className="bg-white p-4 rounded-lg border-l-4 border-green-400 shadow-inner">
                                     <p className="text-sm text-gray-800">
-                                        {result.description || result.content || 'No description available'}
+                                        {highlightText(result.description || result.content || 'No description available')}
                                     </p>
                                 </div>
                             ) : result.type === 'table' ? (
                                 // For table elements, show both rendered table and raw HTML
                                 <div className="space-y-4">
-                                    {/* Rendered Table */}
                                     <div className="bg-white p-4 rounded-lg border-l-4 border-blue-400 shadow-inner">
                                         <div className="mb-2">
                                             <span className="text-xs font-medium text-gray-600">Visual Table:</span>
                                         </div>
                                         <div className="overflow-auto max-h-64 border rounded bg-gray-50 p-2">
-                                            <div 
+                                            <div
                                                 dangerouslySetInnerHTML={{ __html: result.content || 'No table content available' }}
                                                 className="text-sm [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:p-2 [&_th]:bg-gray-100 [&_th]:font-bold [&_td]:border [&_td]:border-gray-300 [&_td]:p-2 [&_tr:nth-child(even)]:bg-white"
                                             />
                                         </div>
                                     </div>
-                                    
-                                    {/* Raw HTML Content (collapsible) */}
                                     <details className="bg-white rounded-lg border-l-4 border-gray-400 shadow-inner">
                                         <summary className="p-3 cursor-pointer text-sm font-medium text-gray-700 hover:bg-gray-50">
                                             View Raw HTML Content
@@ -1095,12 +1175,12 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                                             <div className="mb-1">
                                                 <span className="text-xs font-medium text-gray-600">Description:</span>
                                             </div>
-                                            <p className="text-sm text-gray-800">{result.description}</p>
+                                            <p className="text-sm text-gray-800">{highlightText(result.description)}</p>
                                         </div>
                                     )}
                                     <div className="bg-white p-4 rounded-lg border-l-4 border-green-400 shadow-inner">
                                         <pre className="whitespace-pre-wrap font-mono text-sm text-gray-800 max-h-64 overflow-y-auto">
-                                            {result.content || 'No content available'}
+                                            {highlightText(result.content || 'No content available')}
                                         </pre>
                                     </div>
                                 </div>
@@ -1274,6 +1354,71 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
         }
     };
 
+    const generateAISummary = async () => {
+        if (processedSessionFiles.length === 0) return;
+        setSummaryLoading(true);
+        setSummaryError(null);
+        setSummaryText(null);
+        setShowSummaryPanel(true);
+        try {
+            const result = await apiCall("/api/summarize-document", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ file_paths: processedSessionFiles })
+            });
+            if (result.success) {
+                setSummaryText(result.summary);
+            } else {
+                setSummaryError(result.message || "Summary failed");
+            }
+        } catch (err) {
+            setSummaryError(getErrorMessage(err));
+        } finally {
+            setSummaryLoading(false);
+        }
+    };
+
+    const loadDocumentHistory = async () => {
+        setHistoryLoading(true);
+        setHistoryError(null);
+        setShowHistoryPanel(true);
+        try {
+            const result = await apiCall("/api/processed-files");
+            if (result.success) {
+                setHistoryFiles(result.processed_files || []);
+            } else {
+                setHistoryError(result.error || "Failed to load history");
+            }
+        } catch (err) {
+            setHistoryError(getErrorMessage(err));
+        } finally {
+            setHistoryLoading(false);
+        }
+    };
+
+    const loadHistoricalDocument = async (filePath: string) => {
+        setProcessedSessionFiles([filePath]);
+        setShowDeltaTableResults(true);
+        setDeltaTableLoading(true);
+        setDeltaTableResults([]);
+        setShowHistoryPanel(false);
+        try {
+            const result = await apiCall("/api/query-delta-table", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ file_paths: [filePath], limit: 50 })
+            });
+            if (result.success && result.data) {
+                setDeltaTableResults(result.data);
+            }
+            await fetchPageMetadata([filePath]);
+        } catch (err) {
+            setDeltaTableError(getErrorMessage(err));
+        } finally {
+            setDeltaTableLoading(false);
+        }
+    };
+
     const formatFileSize = (bytes: number) => {
         if (bytes === 0) return '0 Bytes';
         const k = 1024;
@@ -1356,6 +1501,27 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
     useEffect(() => {
         checkBatchConfig();
     }, []);
+
+    // Keyboard navigation: ← → for page prev/next, Escape to exit fullscreen
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+            if (e.key === 'Escape') {
+                setFullscreenPageId(null);
+                return;
+            }
+            if (!pageMetadata || pageMetadata.pages.length === 0 || selectedPageNumber === null) return;
+            const sorted = [...pageMetadata.pages].sort((a, b) => parseInt(a.page_number) - parseInt(b.page_number));
+            const currentIndex = sorted.findIndex(p => p.page_id === selectedPageNumber);
+            if (e.key === 'ArrowLeft' && currentIndex > 0) {
+                handlePageSelection(sorted[currentIndex - 1].page_id);
+            } else if (e.key === 'ArrowRight' && currentIndex < sorted.length - 1) {
+                handlePageSelection(sorted[currentIndex + 1].page_id);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [pageMetadata, selectedPageNumber]);
 
     const handleBatchFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (e.target.files && e.target.files.length > 0) {
@@ -2129,7 +2295,32 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
 
                 {/* Right Panel: File Preview and Results - 3/4 width */}
                 <div className="lg:w-3/4 flex flex-col gap-6 overflow-y-auto pl-2">
-                    <h2 className="text-xl font-semibold text-center">Preview & Results</h2>
+                    <div className="flex items-center justify-between">
+                        <h2 className="text-xl font-semibold">Preview & Results</h2>
+                        <div className="flex items-center gap-2">
+                            {processedSessionFiles.length > 0 && (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={generateAISummary}
+                                    disabled={summaryLoading}
+                                    className="text-violet-600 border-violet-300 hover:bg-violet-50 text-xs"
+                                >
+                                    {summaryLoading ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Sparkles className="h-3 w-3 mr-1" />}
+                                    AI Summary
+                                </Button>
+                            )}
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={loadDocumentHistory}
+                                className="text-gray-600 border-gray-300 hover:bg-gray-50 text-xs"
+                            >
+                                <History className="h-3 w-3 mr-1" />
+                                History
+                            </Button>
+                        </div>
+                    </div>
                     
                     {/* Page Navigation Card - Shows after processing completes and we have page metadata */}
                     {pageMetadata && pageMetadata.total_pages > 0 && (
@@ -2287,6 +2478,95 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                     )}
 
 
+                    {/* AI Document Summary Card */}
+                    {showSummaryPanel && (
+                        <Card className="bg-gradient-to-r from-violet-50 to-purple-50 border-violet-200">
+                            <CardHeader className="pb-3">
+                                <CardTitle className="flex items-center justify-between">
+                                    <div className="flex items-center">
+                                        <Sparkles className="mr-2 h-5 w-5 text-violet-600" />
+                                        AI Document Summary
+                                    </div>
+                                    <button onClick={() => setShowSummaryPanel(false)} className="text-gray-400 hover:text-gray-600 text-sm">✕</button>
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                {summaryLoading ? (
+                                    <div className="flex items-center gap-2 p-4">
+                                        <Loader2 className="h-5 w-5 animate-spin text-violet-600" />
+                                        <span className="text-violet-700">Generating summary with Llama 3.3...</span>
+                                    </div>
+                                ) : summaryError ? (
+                                    <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">{summaryError}</div>
+                                ) : summaryText ? (
+                                    <div className="space-y-3">
+                                        <div className="bg-white rounded-lg p-4 border border-violet-200 text-gray-800 leading-relaxed text-sm">
+                                            {summaryText}
+                                        </div>
+                                        <div className="flex items-center gap-1 text-xs text-violet-600">
+                                            <Sparkles className="h-3 w-3" />
+                                            Generated by Databricks ai_query with databricks-meta-llama-3-3-70b-instruct
+                                        </div>
+                                        <button
+                                            onClick={() => copyElementText('summary', summaryText)}
+                                            className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-violet-300 bg-white hover:bg-violet-50 text-violet-600"
+                                        >
+                                            {copiedElementId === 'summary' ? <><Check className="h-3 w-3" /> Copied</> : <><Copy className="h-3 w-3" /> Copy Summary</>}
+                                        </button>
+                                    </div>
+                                ) : null}
+                            </CardContent>
+                        </Card>
+                    )}
+
+                    {/* Document History Panel */}
+                    {showHistoryPanel && (
+                        <Card className="border-gray-200">
+                            <CardHeader className="pb-3">
+                                <CardTitle className="flex items-center justify-between">
+                                    <div className="flex items-center">
+                                        <History className="mr-2 h-5 w-5 text-gray-600" />
+                                        Document History
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <button onClick={loadDocumentHistory} className="text-blue-500 hover:text-blue-700" title="Refresh">
+                                            <RefreshCw className="h-4 w-4" />
+                                        </button>
+                                        <button onClick={() => setShowHistoryPanel(false)} className="text-gray-400 hover:text-gray-600 text-sm">✕</button>
+                                    </div>
+                                </CardTitle>
+                                <CardDescription className="text-xs">Previously processed documents in the delta table — click to reload</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                {historyLoading ? (
+                                    <div className="flex items-center gap-2 p-3">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span className="text-sm">Loading history...</span>
+                                    </div>
+                                ) : historyError ? (
+                                    <div className="text-sm text-red-600 bg-red-50 p-3 rounded">{historyError}</div>
+                                ) : historyFiles.length === 0 ? (
+                                    <p className="text-sm text-gray-500 text-center py-4">No processed documents found in delta table.</p>
+                                ) : (
+                                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                                        {historyFiles.map((f, i) => (
+                                            <button
+                                                key={i}
+                                                onClick={() => loadHistoricalDocument(f.path)}
+                                                className="w-full text-left p-3 rounded-lg border border-gray-200 hover:border-blue-400 hover:bg-blue-50 transition-colors"
+                                            >
+                                                <div className="font-medium text-sm text-gray-800 truncate">{f.filename}</div>
+                                                <div className="text-xs text-gray-500 mt-1">
+                                                    {f.total_pages} pages · {f.total_elements} elements
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    )}
+
                     {/* Page Visualizations Card */}
                     {(Object.keys(imageVisualization || {}).length > 0 || imageVisualizationLoading) && (
                         <Card>
@@ -2339,7 +2619,7 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                                                             </div>
                                                         </div>
                                                         
-                                                        {/* Zoom Controls */}
+                                                        {/* Zoom Controls + Fullscreen */}
                                                         <div className="flex items-center space-x-2">
                                                             <Button
                                                                 variant="outline"
@@ -2369,6 +2649,15 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                                                                 className="text-xs px-2"
                                                             >
                                                                 Reset
+                                                            </Button>
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => setFullscreenPageId(pageId)}
+                                                                className="h-8 w-8 p-0 text-purple-600"
+                                                                title="Fullscreen"
+                                                            >
+                                                                <Maximize2 className="h-4 w-4" />
                                                             </Button>
                                                         </div>
                                                     </div>
@@ -2515,6 +2804,30 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
 
                 </div>
             </main>
+
+            {/* Fullscreen visualization overlay */}
+            {fullscreenPageId && imageVisualization && imageVisualization[fullscreenPageId] && (
+                <div className="fixed inset-0 z-50 bg-black bg-opacity-90 flex flex-col" onClick={() => setFullscreenPageId(null)}>
+                    <div className="flex items-center justify-between px-6 py-3 bg-gray-900 text-white" onClick={e => e.stopPropagation()}>
+                        <span className="font-semibold">Page {parseInt(fullscreenPageId) + 1} — Fullscreen</span>
+                        <div className="flex items-center gap-3">
+                            <span className="text-xs text-gray-400">{imageVisualization[fullscreenPageId].elements.length} elements · Press Esc to close</span>
+                            <button onClick={() => setFullscreenPageId(null)} className="text-white hover:text-gray-300">
+                                <Minimize2 className="h-5 w-5" />
+                            </button>
+                        </div>
+                    </div>
+                    <div className="flex-1 overflow-auto flex items-center justify-center p-4" onClick={e => e.stopPropagation()}>
+                        <FloatingTooltip elements={imageVisualization[fullscreenPageId].elements || []} onElementHover={setHoveredElement}>
+                            <img
+                                src={`data:image/png;base64,${imageVisualization[fullscreenPageId].image_base64}`}
+                                alt={`Page ${parseInt(fullscreenPageId) + 1} fullscreen`}
+                                className="max-w-full max-h-full object-contain rounded shadow-2xl"
+                            />
+                        </FloatingTooltip>
+                    </div>
+                </div>
+            )}
                 </>
             )}
 

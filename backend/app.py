@@ -1595,6 +1595,72 @@ def visualize_page(request: VisualizePageRequest):
         }
 
 
+class SummarizeDocumentRequest(BaseModel):
+    file_paths: List[str]
+
+@app.post("/api/summarize-document")
+def summarize_document(request: SummarizeDocumentRequest):
+    """Use Databricks ai_query to summarize a processed document's extracted text"""
+    if not w:
+        raise HTTPException(status_code=500, detail="Databricks connection is not configured.")
+    if not current_warehouse_id:
+        raise HTTPException(status_code=500, detail="DATABRICKS_WAREHOUSE_ID is not set.")
+
+    try:
+        destination_table = get_delta_table_path()
+
+        paths_list = ", ".join([f"'{p}'" if not p.startswith('dbfs:') else f"'dbfs:{p}'"
+                                for p in request.file_paths])
+        dbfs_paths_list = ", ".join(
+            [f"'dbfs:{p}'" if p.startswith('/Volumes/') else f"'{p}'"
+             for p in request.file_paths]
+        )
+
+        # Gather all text content (exclude figures and headers to keep it clean)
+        content_query = f"""
+        SELECT concat_ws(' ', collect_list(content)) as full_text
+        FROM IDENTIFIER('{destination_table}')
+        WHERE path IN ({dbfs_paths_list})
+          AND type NOT IN ('figure', 'page_header', 'page_footer')
+          AND content IS NOT NULL
+          AND length(content) > 10
+        """
+
+        result = execute_and_wait(content_query, current_warehouse_id)
+
+        if not result.result or not result.result.data_array:
+            return {"success": False, "message": "No text content found for summary"}
+
+        full_text = result.result.data_array[0][0] if result.result.data_array[0][0] else ""
+        if not full_text.strip():
+            return {"success": False, "message": "Document text is empty"}
+
+        # Truncate to avoid token limits
+        truncated = full_text[:6000] if len(full_text) > 6000 else full_text
+
+        prompt = f"Summarize the following document content in 4-6 sentences. Focus on the key topics, main findings or information, and purpose of the document. Be concise and informative:\\n\\n{truncated}"
+        escaped_prompt = prompt.replace("'", "\\'")
+
+        summary_query = f"""
+        SELECT ai_query(
+            'databricks-meta-llama-3-3-70b-instruct',
+            '{escaped_prompt}'
+        ) as summary
+        """
+
+        summary_result = execute_and_wait(summary_query, current_warehouse_id)
+
+        if summary_result.result and summary_result.result.data_array:
+            summary = summary_result.result.data_array[0][0]
+            return {"success": True, "summary": summary}
+        else:
+            return {"success": False, "message": "AI query returned no result"}
+
+    except Exception as e:
+        print(f"Document summarization error: {e}")
+        return {"success": False, "message": f"Summary failed: {str(e)}"}
+
+
 # Mount static files for Next.js assets (_next directory, favicon, etc.)
 # Use absolute path in Databricks Apps environment
 if os.path.exists("/Workspace/Users/q.yu@databricks.com/databricks_apps/document-intelligence/static"):
