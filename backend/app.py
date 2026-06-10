@@ -40,6 +40,20 @@ load_dotenv()
 
 app = FastAPI()
 
+def execute_and_wait(statement: str, warehouse_id: str, max_wait: int = 300) -> object:
+    """Execute a SQL statement and poll until completion."""
+    result = w.statement_execution.execute_statement(
+        statement=statement,
+        warehouse_id=warehouse_id,
+        wait_timeout="0s"
+    )
+    waited = 0
+    while result.status.state in (StatementState.PENDING, StatementState.RUNNING) and waited < max_wait:
+        time.sleep(3)
+        waited += 3
+        result = w.statement_execution.get_statement(result.statement_id)
+    return result
+
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
@@ -1077,11 +1091,7 @@ def list_processed_files():
 
         print(f"Executing processed files query: {query}")
 
-        result = w.statement_execution.execute_statement(
-            statement=query,
-            warehouse_id=current_warehouse_id,
-            wait_timeout='30s'
-        )
+        result = execute_and_wait(query, current_warehouse_id)
 
         if result.result and result.result.data_array:
             processed_files = []
@@ -1179,12 +1189,8 @@ def query_delta_table(request: QueryDeltaTableRequest):
         """
         
         print(f"Executing query: {query}")
-        
-        result = w.statement_execution.execute_statement(
-            statement=query,
-            warehouse_id=current_warehouse_id,
-            wait_timeout='30s'
-        )
+
+        result = execute_and_wait(query, current_warehouse_id)
 
         if result.result and result.result.data_array:
             delta_results = []
@@ -1270,12 +1276,8 @@ def get_page_metadata(request: PageMetadataRequest):
         """
         
         print(f"Executing page metadata query: {query}")
-        
-        result = w.statement_execution.execute_statement(
-            statement=query,
-            warehouse_id=current_warehouse_id,
-            wait_timeout='30s'
-        )
+
+        result = execute_and_wait(query, current_warehouse_id)
 
         if result.result and result.result.data_array:
             pages_metadata = []
@@ -1371,12 +1373,8 @@ def visualize_page(request: VisualizePageRequest):
         """
         
         print(f"Executing visualization query: {query}")
-        
-        result = w.statement_execution.execute_statement(
-            statement=query,
-            warehouse_id=current_warehouse_id,
-            wait_timeout='30s'
-        )
+
+        result = execute_and_wait(query, current_warehouse_id)
 
         if not result.result or not result.result.data_array:
             return {

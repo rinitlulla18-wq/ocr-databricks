@@ -79,10 +79,10 @@ echo "🔨 Building frontend..."
 
  # Delete old static files to prevent conflicts
  echo "🧹 Cleaning old static files..."
- databricks workspace delete "$APP_FOLDER_IN_WORKSPACE/static" --recursive --profile $PROFILE 2>/dev/null || true
+ ~/bin/databricks workspace delete "$APP_FOLDER_IN_WORKSPACE/static" --recursive --profile $PROFILE 2>/dev/null || true
 
  echo "📤 Uploading frontend static files..."
- databricks workspace import-dir out "$APP_FOLDER_IN_WORKSPACE/static" --overwrite --profile $PROFILE
+ ~/bin/databricks workspace import-dir out "$APP_FOLDER_IN_WORKSPACE/static" --overwrite --profile $PROFILE
 ) &
 
 # Backend packaging
@@ -95,7 +95,7 @@ echo "📦 Packaging backend..."
  
  echo "📤 Uploading backend..."
  # Import and deploy the application
- databricks workspace import-dir build "$APP_FOLDER_IN_WORKSPACE" --overwrite --profile $PROFILE
+ ~/bin/databricks workspace import-dir build "$APP_FOLDER_IN_WORKSPACE" --overwrite --profile $PROFILE
  rm -rf build
 ) &
 
@@ -104,7 +104,7 @@ wait
 
 echo "🚀 Deploying application..."
 # Deploy the application
-databricks apps deploy "$LAKEHOUSE_APP_NAME" --source-code-path "$APP_FOLDER_IN_WORKSPACE" --profile $PROFILE
+~/bin/databricks apps deploy "$LAKEHOUSE_APP_NAME" --source-code-path "$APP_FOLDER_IN_WORKSPACE" --profile $PROFILE
 
 echo "✅ Deployment complete!"
 echo "🌐 App URL: Check your Databricks workspace for the app URL"

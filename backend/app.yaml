@@ -9,15 +9,17 @@ env:
 - name: DATABRICKS_APP_PORT
   value: '8000'
 - name: DATABRICKS_WAREHOUSE_ID
-  value: 862f1d757f0424f7
+  value: 89b66b8c215e27e1
 - name: STATIC_FILES_PATH
-  value: /Workspace/Users/q.yu@databricks.com/databricks_apps/ai-parse-job-enhanced/static
+  value: /Workspace/Users/rinitlulla18@gmail.com/apps/ai-parse-demo/static
 - name: NEXT_PUBLIC_API_URL
-  value: https://e2-demo-field-eng.cloud.databricks.com:8000
+  value: https://ai-parse-demo-7474647534040832.aws.databricksapps.com
 - name: DATABRICKS_VOLUME_PATH
-  value: /Volumes/main/ai_parse_document_demo/ai-parse-job-enhanced/
+  value: /Volumes/workspace/ai_parse_document_demo/ai_parse_job_enhanced/
 - name: DATABRICKS_DELTA_TABLE_PATH
-  value: main.ai_parse_document_demo.ai_parse_job_enhanced_documents
+  value: workspace.ai_parse_document_demo.ai_parse_documents
 - name: BATCH_INPUT_VOLUME_PATH
-  value: /Volumes/main/ai_parse_document_demo/ai_parse_document_app_workflow/
+  value: /Volumes/workspace/ai_parse_document_demo/ai_parse_document_app_workflow/inputs/
+- name: BATCH_JOB_NAME
+  value: ai_parse_document_app_workflow
 runtime: python_3.10

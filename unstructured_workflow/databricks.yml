@@ -6,7 +6,7 @@ bundle:
 variables:
   catalog:
     description: The catalog name for the workflow
-    default: main
+    default: workspace
   schema:
     description: The schema name for the workflow
     default: ai_parse_document_demo
@@ -15,13 +15,13 @@ variables:
     default: Yes
   source_volume_path:
     description: Source volume path for PDF files
-    default: /Volumes/main/ai_parse_document_demo/ai_parse_document_app_workflow/
+    default: /Volumes/workspace/ai_parse_document_demo/ai_parse_document_app_workflow/inputs/
   output_volume_path:
     description: Output volume path for processed images
-    default: /Volumes/main/ai_parse_document_demo/ai_parse_document_app_workflow/outputs/
+    default: /Volumes/workspace/ai_parse_document_demo/ai_parse_document_app_workflow/outputs/
   checkpoint_base_path:
     description: Base path for Structured Streaming checkpoints
-    default: /Volumes/main/ai_parse_document_demo/checkpoints/ai_parse_document_app_workflow/
+    default: /Volumes/workspace/ai_parse_document_demo/checkpoints/ai_parse_document_app_workflow/
   raw_table_name:
     description: Table name for raw parsed documents
     default: parsed_documents_raw
