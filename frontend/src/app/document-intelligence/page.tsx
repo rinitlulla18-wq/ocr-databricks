@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useState, useRef, useEffect } from 'react';
 import Link from "next/link";
-import { ArrowLeft, Upload, FileText, Database, Settings, AlertCircle, File, Eye, Play, Loader2, Lightbulb, Save, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
+import { ArrowLeft, Upload, FileText, Database, Settings, AlertCircle, File, Eye, Play, Loader2, Lightbulb, Save, ChevronDown, ChevronRight, RefreshCw, Download, Copy, Check, Clock, Filter } from "lucide-react";
 import { apiCall } from "@/lib/api-config";
 import { FloatingTooltip } from "@/components/ui/floating-tooltip";
 
@@ -43,6 +43,8 @@ interface SelectedFile {
     ucPath?: string;
     isProcessing: boolean;
     processError?: string;
+    uploadStartTime?: number;
+    uploadEndTime?: number;
 }
 
 interface WarehouseConfig {
@@ -138,6 +140,15 @@ export default function DocumentIntelligencePage() {
     
     // Hovering state for element highlighting
     const [hoveredElement, setHoveredElement] = useState<any | null>(null);
+
+    // Processing stats (timing + counts)
+    const [processingStats, setProcessingStats] = useState<{ocrStartTime: number, ocrEndTime: number | null} | null>(null);
+
+    // Element type filter for delta table results
+    const [elementTypeFilter, setElementTypeFilter] = useState<string>('all');
+
+    // Copy confirmation state per element
+    const [copiedElementId, setCopiedElementId] = useState<string | null>(null);
 
     // Utility function to extract error message from various error types
     const getErrorMessage = (err: unknown): string => {
@@ -402,9 +413,11 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
 
         // Processing starts without collapsing panels
 
+        const uploadStartTime = Date.now();
+
         // Mark as processing
-        setSelectedFiles(prev => prev.map((f, i) => 
-            i === fileIndex ? { ...f, isProcessing: true, processError: undefined } : f
+        setSelectedFiles(prev => prev.map((f, i) =>
+            i === fileIndex ? { ...f, isProcessing: true, processError: undefined, uploadStartTime } : f
         ));
 
         try {
@@ -422,15 +435,17 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                 throw new Error("Failed to get UC path from upload response");
             }
 
-            // Update file with UC path
-            setSelectedFiles(prev => prev.map((f, i) => 
-                i === fileIndex ? { ...f, isUploaded: true, ucPath } : f
+            const uploadEndTime = Date.now();
+
+            // Update file with UC path and timing
+            setSelectedFiles(prev => prev.map((f, i) =>
+                i === fileIndex ? { ...f, isUploaded: true, ucPath, uploadEndTime } : f
             ));
 
             // Upload complete - mark file as uploaded and not processing
-            setSelectedFiles(prev => prev.map((f, i) => 
-                i === fileIndex ? { 
-                    ...f, 
+            setSelectedFiles(prev => prev.map((f, i) =>
+                i === fileIndex ? {
+                    ...f,
                     isProcessing: false
                 } : f
             ));
@@ -450,6 +465,8 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
         try {
             setDeltaTableError(null); // Clear previous errors
             setDeltaTableLoading(true); // Show loading state
+            setProcessingStats(null);
+            const ocrStartTime = Date.now();
             console.log("Starting write operation for:", filePaths);
             
             // FIRE AND FORGET: Start the write operation but don't wait for it
@@ -505,10 +522,11 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                         setDeltaTableResults(queryResult.data);
                         setDeltaTableError(null);
                         setDeltaTableLoading(false);
-                        
+                        setProcessingStats({ ocrStartTime, ocrEndTime: Date.now() });
+
                         // Fetch page metadata after successful processing
                         await fetchPageMetadata(filePaths);
-                        
+
                         console.log(`SUCCESS: Retrieved ${queryResult.data.length} results after ${attemptCount + 1} attempts`);
                         return;
                     } else {
@@ -895,12 +913,73 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
             );
         }
 
+        const uniqueTypes = getUniqueElementTypes();
+        const filtered = elementTypeFilter === 'all' ? deltaTableResults : deltaTableResults.filter(r => (r.type || 'unknown') === elementTypeFilter);
+
         return (
             <div className="space-y-4">
-                <div className="text-sm text-gray-600 mb-4">
-                    Showing {deltaTableResults.length} extracted elements from delta table: {deltaTablePathConfig.delta_table_path}
+                {/* Processing stats banner */}
+                {processingStats && (
+                    <div className="flex flex-wrap items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm">
+                        <div className="flex items-center gap-1 text-green-700 font-semibold">
+                            <Check className="h-4 w-4" />
+                            Processing Complete
+                        </div>
+                        <div className="flex items-center gap-1 text-gray-600">
+                            <Clock className="h-4 w-4 text-blue-500" />
+                            OCR: <span className="font-mono font-semibold text-blue-700">{calculateDuration(processingStats.ocrStartTime, processingStats.ocrEndTime)}</span>
+                        </div>
+                        {selectedFiles.some(f => f.uploadStartTime && f.uploadEndTime) && (
+                            <div className="flex items-center gap-1 text-gray-600">
+                                <Upload className="h-4 w-4 text-purple-500" />
+                                Upload: <span className="font-mono font-semibold text-purple-700">
+                                    {calculateDuration(
+                                        Math.min(...selectedFiles.filter(f => f.uploadStartTime).map(f => f.uploadStartTime!)),
+                                        Math.max(...selectedFiles.filter(f => f.uploadEndTime).map(f => f.uploadEndTime!))
+                                    )}
+                                </span>
+                            </div>
+                        )}
+                        <div className="flex items-center gap-1 text-gray-600">
+                            <FileText className="h-4 w-4 text-orange-500" />
+                            <span className="font-mono font-semibold text-orange-700">{deltaTableResults.length}</span> elements · <span className="font-mono font-semibold text-orange-700">{pageMetadata?.total_pages ?? '?'}</span> pages
+                        </div>
+                        <div className="ml-auto flex gap-2">
+                            <Button size="sm" variant="outline" onClick={downloadResultsAsCSV} className="text-xs h-7">
+                                <Download className="h-3 w-3 mr-1" /> CSV
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={downloadResultsAsJSON} className="text-xs h-7">
+                                <Download className="h-3 w-3 mr-1" /> JSON
+                            </Button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Filter by element type */}
+                {uniqueTypes.length > 1 && (
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Filter className="h-4 w-4 text-gray-500" />
+                        <span className="text-xs text-gray-500">Filter:</span>
+                        {['all', ...uniqueTypes].map(t => (
+                            <button
+                                key={t}
+                                onClick={() => setElementTypeFilter(t)}
+                                className={`px-2 py-1 text-xs rounded-full border transition-colors ${
+                                    elementTypeFilter === t
+                                        ? 'bg-blue-600 text-white border-blue-600'
+                                        : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400'
+                                }`}
+                            >
+                                {t === 'all' ? `All (${deltaTableResults.length})` : `${t} (${deltaTableResults.filter(r => (r.type||'unknown') === t).length})`}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                <div className="text-sm text-gray-600">
+                    Showing {filtered.length}{elementTypeFilter !== 'all' ? ` ${elementTypeFilter}` : ''} elements from delta table: {deltaTablePathConfig.delta_table_path}
                 </div>
-                {deltaTableResults.map((result, index) => (
+                {filtered.map((result, index) => (
                     <div key={index} className={`border rounded-lg p-5 shadow-sm hover:shadow-md transition-shadow ${
                         hoveredElement && hoveredElement.element_id === result.element_id 
                             ? 'bg-gradient-to-r from-purple-100 to-purple-50 border-purple-300 ring-2 ring-purple-400' 
@@ -1031,10 +1110,23 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                         {/* Enhanced Action Bar */}
                         <div className="flex items-center justify-between p-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-lg border">
                             <div className="text-xs text-gray-600">
-                                <span className="font-semibold">AI Function:</span> ai_parse_document 
+                                <span className="font-semibold">AI Function:</span> ai_parse_document
                                 <span className="ml-2 text-gray-500">→</span>
                                 <span className="ml-2 font-mono">{result.type}</span>
                             </div>
+                            {result.content && result.type !== 'figure' && (
+                                <button
+                                    onClick={() => copyElementText(String(result.element_id), result.content)}
+                                    className="flex items-center gap-1 text-xs px-2 py-1 rounded border border-gray-300 bg-white hover:bg-gray-50 text-gray-600 transition-colors"
+                                    title="Copy content to clipboard"
+                                >
+                                    {copiedElementId === String(result.element_id) ? (
+                                        <><Check className="h-3 w-3 text-green-500" /> Copied</>
+                                    ) : (
+                                        <><Copy className="h-3 w-3" /> Copy</>
+                                    )}
+                                </button>
+                            )}
                         </div>
                     </div>
                 ))}
@@ -1188,6 +1280,52 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
         const sizes = ['Bytes', 'KB', 'MB', 'GB'];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
+    const copyElementText = async (elementId: string, text: string) => {
+        try {
+            await navigator.clipboard.writeText(text);
+            setCopiedElementId(elementId);
+            setTimeout(() => setCopiedElementId(null), 2000);
+        } catch {
+            // fallback
+        }
+    };
+
+    const downloadResultsAsCSV = () => {
+        if (deltaTableResults.length === 0) return;
+        const headers = ['element_id', 'type', 'page_id', 'path', 'bbox', 'content', 'description'];
+        const rows = deltaTableResults.map(r => headers.map(h => {
+            const val = r[h];
+            if (Array.isArray(val)) return `"${val.join(',')}"`;
+            if (typeof val === 'string') return `"${val.replace(/"/g, '""')}"`;
+            return val ?? '';
+        }).join(','));
+        const csv = [headers.join(','), ...rows].join('\n');
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ocr_results_${Date.now()}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const downloadResultsAsJSON = () => {
+        if (deltaTableResults.length === 0) return;
+        const json = JSON.stringify(deltaTableResults, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ocr_results_${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const getUniqueElementTypes = () => {
+        const types = new Set<string>(deltaTableResults.map(r => r.type || 'unknown'));
+        return Array.from(types).sort();
     };
 
 
@@ -1835,7 +1973,14 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                                                 <div className="font-medium text-sm truncate">{file.name}</div>
                                                 <div className="text-xs text-gray-500">
                                                     {formatFileSize(file.size)} • {file.type}
-                                                    {file.isUploaded && <span className="text-green-600 ml-2">✓ Uploaded</span>}
+                                                    {file.isUploaded && (
+                                                        <span className="text-green-600 ml-2">
+                                                            ✓ Uploaded
+                                                            {file.uploadStartTime && file.uploadEndTime && (
+                                                                <span className="ml-1 text-gray-400">({calculateDuration(file.uploadStartTime, file.uploadEndTime)})</span>
+                                                            )}
+                                                        </span>
+                                                    )}
                                                 </div>
                                             </div>
                                         </div>
@@ -1940,6 +2085,26 @@ Click the "Process" button to upload this file to UC Volume and extract its cont
                                     {selectedFiles.filter(f => f.isUploaded).length === 0 && (
                                         <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded text-center">
                                             Upload documents first to write to Delta Table
+                                        </div>
+                                    )}
+
+                                    {/* Show quick stats after processing */}
+                                    {processingStats && deltaTableResults.length > 0 && (
+                                        <div className="flex flex-wrap gap-2 p-2 bg-white rounded border border-green-200 text-xs text-gray-600">
+                                            <span className="flex items-center gap-1">
+                                                <Clock className="h-3 w-3 text-blue-500" />
+                                                OCR: <strong className="text-blue-700">{calculateDuration(processingStats.ocrStartTime, processingStats.ocrEndTime)}</strong>
+                                            </span>
+                                            <span className="flex items-center gap-1">
+                                                <FileText className="h-3 w-3 text-orange-500" />
+                                                <strong className="text-orange-700">{deltaTableResults.length}</strong> elements
+                                            </span>
+                                            <button onClick={downloadResultsAsCSV} className="flex items-center gap-1 ml-auto text-blue-600 hover:underline">
+                                                <Download className="h-3 w-3" /> CSV
+                                            </button>
+                                            <button onClick={downloadResultsAsJSON} className="flex items-center gap-1 text-blue-600 hover:underline">
+                                                <Download className="h-3 w-3" /> JSON
+                                            </button>
                                         </div>
                                     )}
 
