@@ -6,56 +6,42 @@ set -e
 # Usage: bash setup-and-deploy.sh
 # ============================================================
 
-# ---------- CONFIG - FILL THESE ----------
-DATABRICKS_HOST=""        # e.g. https://adb-xxxx.azuredatabricks.net
-DATABRICKS_TOKEN=""       # your PAT token
+DATABRICKS_HOST="https://adb-7970838286274484.4.azuredatabricks.net"
+YOUR_EMAIL="yukta.khatri@honeywell.com"
 APP_NAME="ai-parse-demo"
-YOUR_EMAIL=""             # your Databricks workspace email
-# -----------------------------------------
 
-# Prompt if not set
-if [ -z "$DATABRICKS_HOST" ]; then
-  read -p "Databricks Host URL: " DATABRICKS_HOST
-fi
-if [ -z "$DATABRICKS_TOKEN" ]; then
-  read -sp "Databricks Token: " DATABRICKS_TOKEN; echo
-fi
-if [ -z "$YOUR_EMAIL" ]; then
-  read -p "Your workspace email: " YOUR_EMAIL
-fi
+# Token is asked at runtime (GitHub blocks hardcoded secrets)
+read -sp "Paste your Databricks Token: " DATABRICKS_TOKEN; echo
 
 APP_WORKSPACE_PATH="/Workspace/Users/${YOUR_EMAIL}/apps/${APP_NAME}"
 
 echo ""
 echo "======================================"
 echo " Host  : $DATABRICKS_HOST"
+echo " Email : $YOUR_EMAIL"
 echo " App   : $APP_NAME"
-echo " Path  : $APP_WORKSPACE_PATH"
 echo "======================================"
 
 # ---------- 1. Install CLI ----------
 echo ""
-echo "[1/6] Installing Databricks CLI..."
-if ! command -v databricks &>/dev/null; then
-  arch=$(uname -m)
-  os=$(uname -s | tr '[:upper:]' '[:lower:]')
-  [ "$arch" = "arm64" ] && arch="arm64" || arch="amd64"
-  [ "$os" = "darwin" ] && os="darwin" || os="linux"
+echo "[1/7] Checking Databricks CLI..."
+CLI=$(command -v databricks 2>/dev/null || echo "")
+if [ -z "$CLI" ]; then
+  arch=$(uname -m); os=$(uname -s | tr '[:upper:]' '[:lower:]')
+  [ "$arch" = "arm64" ] && ARCH="arm64" || ARCH="amd64"
   curl -fsSL -o /tmp/db_cli.zip \
-    "https://github.com/databricks/cli/releases/download/v0.240.0/databricks_cli_0.240.0_${os}_${arch}.zip"
-  unzip -o /tmp/db_cli.zip databricks -d /usr/local/bin/ 2>/dev/null || \
-    { mkdir -p ~/bin && unzip -o /tmp/db_cli.zip databricks -d ~/bin/; export PATH="$HOME/bin:$PATH"; }
-  echo "✅ CLI installed"
-else
-  echo "✅ CLI already installed: $(databricks --version)"
+    "https://github.com/databricks/cli/releases/download/v0.240.0/databricks_cli_0.240.0_${os}_${ARCH}.zip"
+  mkdir -p ~/bin
+  unzip -o /tmp/db_cli.zip databricks -d ~/bin/
+  chmod +x ~/bin/databricks
+  export PATH="$HOME/bin:$PATH"
+  CLI="$HOME/bin/databricks"
 fi
-
-CLI=$(command -v databricks || echo "$HOME/bin/databricks")
+echo "✅ CLI: $($CLI --version)"
 
 # ---------- 2. Configure CLI ----------
 echo ""
-echo "[2/6] Configuring CLI..."
-mkdir -p ~/.databricks
+echo "[2/7] Configuring CLI..."
 cat > ~/.databrickscfg << CFGEOF
 [DEFAULT]
 host = ${DATABRICKS_HOST}
@@ -66,30 +52,33 @@ echo "✅ CLI configured"
 
 # ---------- 3. Clone repo ----------
 echo ""
-echo "[3/6] Cloning repo..."
+echo "[3/7] Cloning repo..."
 REPO_DIR="$HOME/ocr-databricks"
-if [ -d "$REPO_DIR" ]; then
+if [ -d "$REPO_DIR/.git" ]; then
+  echo "Repo exists, pulling latest..."
   cd "$REPO_DIR" && git pull
 else
   git clone https://github.com/rinitlulla18-wq/ocr-databricks.git "$REPO_DIR"
-  cd "$REPO_DIR"
 fi
-echo "✅ Repo ready at $REPO_DIR"
+cd "$REPO_DIR"
+echo "✅ Repo ready"
 
-# ---------- 4. Install Node & deps ----------
+# ---------- 4. Install Node deps ----------
 echo ""
-echo "[4/6] Setting up frontend..."
+echo "[4/7] Installing frontend dependencies..."
 if ! command -v node &>/dev/null; then
+  echo "Installing Node.js..."
   curl -fsSL https://nodejs.org/dist/v20.11.0/node-v20.11.0-linux-x64.tar.gz | tar -xz -C /tmp/
   export PATH="/tmp/node-v20.11.0-linux-x64/bin:$PATH"
 fi
-cd "$REPO_DIR/frontend"
-npm install --silent
-echo "✅ Node deps installed"
+echo "Node: $(node --version)"
+cd "$REPO_DIR/frontend" && npm install --silent
+cd "$REPO_DIR"
+echo "✅ Dependencies ready"
 
-# ---------- 5. Update app.yaml ----------
+# ---------- 5. Write app.yaml ----------
 echo ""
-echo "[5/6] Updating app.yaml..."
+echo "[5/7] Writing app.yaml..."
 cat > "$REPO_DIR/backend/app.yaml" << YAMLEOF
 command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
 runtime: python_3.10
@@ -103,27 +92,28 @@ env:
 - name: "BATCH_INPUT_VOLUME_PATH"
   value: "/Volumes/corp_enit_sandbox_catalog/data_classification_poc/data/"
 - name: "STATIC_FILES_PATH"
-  value: "${APP_WORKSPACE_PATH}/static"
+  value: "$APP_WORKSPACE_PATH/static"
 YAMLEOF
-echo "✅ app.yaml updated"
+echo "✅ app.yaml ready"
 
-# ---------- 6. Create app & deploy ----------
+# ---------- 6. Create App ----------
 echo ""
-echo "[6/6] Creating app and deploying..."
+echo "[6/7] Creating Databricks App..."
+$CLI apps create "$APP_NAME" 2>/dev/null && echo "✅ App created" || echo "ℹ️  App already exists, continuing..."
+
+# ---------- 7. Deploy ----------
+echo ""
+echo "[7/7] Deploying..."
+# Fix CLI path in deploy.sh
+sed -i "s| databricks | $CLI |g" "$REPO_DIR/deploy.sh" 2>/dev/null || \
+sed -i '' "s| databricks | $CLI |g" "$REPO_DIR/deploy.sh" 2>/dev/null || true
+chmod +x "$REPO_DIR/deploy.sh"
 cd "$REPO_DIR"
-
-# Create app (ignore if already exists)
-$CLI apps create "$APP_NAME" 2>/dev/null || echo "App may already exist, continuing..."
-
-# Make deploy.sh use our CLI
-sed -i "s|databricks |$CLI |g" deploy.sh 2>/dev/null || true
-
-chmod +x deploy.sh
 ./deploy.sh "$APP_WORKSPACE_PATH" "$APP_NAME" "DEFAULT"
 
 echo ""
 echo "======================================"
 echo "✅ DEPLOYMENT COMPLETE!"
-echo ""
-$CLI apps get "$APP_NAME" 2>/dev/null | grep -E '"url"|"state"' || true
+APP_URL=$($CLI apps get "$APP_NAME" 2>/dev/null | grep '"url"' | sed 's/.*"url": *"\([^"]*\)".*/\1/' || echo "Check Databricks Apps UI")
+echo "🌐 App URL: $APP_URL"
 echo "======================================"
