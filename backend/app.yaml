@@ -1,27 +1,9 @@
-command:
-- uvicorn
-- app:app
-- --host
-- 0.0.0.0
-- --port
-- '8000'
-env:
-- name: DATABRICKS_APP_PORT
-  value: '8000'
-- name: DATABRICKS_WAREHOUSE_ID
-  value: 02804c29f542248b
-- name: STATIC_FILES_PATH
-  value: /Workspace/Users/rinitlulla18@gmail.com/apps/ai-parse-demo/static
-- name: DATABRICKS_HOST
-  value: https://adb-7970838286274484.4.azuredatabricks.net
-- name: NEXT_PUBLIC_API_URL
-  value: https://adb-7970838286274484.4.azuredatabricks.net
-- name: DATABRICKS_VOLUME_PATH
-  value: /Volumes/corp_enit_sandbox_catalog/data_classification_poc/data/
-- name: DATABRICKS_DELTA_TABLE_PATH
-  value: corp_enit_sandbox_catalog.data_classification_poc.doc_results
-- name: BATCH_INPUT_VOLUME_PATH
-  value: /Volumes/corp_enit_sandbox_catalog/data_classification_poc/data/
-- name: BATCH_JOB_NAME
-  value: ai_parse_document_app_workflow
+command: ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
 runtime: python_3.10
+env:
+- name: "DATABRICKS_WAREHOUSE_ID"
+  value: "02804c29f542248b"
+- name: "DATABRICKS_VOLUME_PATH"
+  value: "/Volumes/corp_enit_sandbox_catalog/data_classification_poc/data/"
+- name: "DATABRICKS_DELTA_TABLE_PATH"
+  value: "corp_enit_sandbox_catalog.data_classification_poc.doc_results"
