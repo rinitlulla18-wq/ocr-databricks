@@ -9,17 +9,19 @@ env:
 - name: DATABRICKS_APP_PORT
   value: '8000'
 - name: DATABRICKS_WAREHOUSE_ID
-  value: 89b66b8c215e27e1
+  value: 02804c29f542248b
 - name: STATIC_FILES_PATH
   value: /Workspace/Users/rinitlulla18@gmail.com/apps/ai-parse-demo/static
+- name: DATABRICKS_HOST
+  value: https://adb-7970838286274484.4.azuredatabricks.net
 - name: NEXT_PUBLIC_API_URL
-  value: https://ai-parse-demo-7474647534040832.aws.databricksapps.com
+  value: https://adb-7970838286274484.4.azuredatabricks.net
 - name: DATABRICKS_VOLUME_PATH
-  value: /Volumes/workspace/ai_parse_document_demo/ai_parse_job_enhanced/
+  value: /Volumes/corp_enit_sandbox_catalog/data_classification_poc/data/
 - name: DATABRICKS_DELTA_TABLE_PATH
-  value: workspace.ai_parse_document_demo.ai_parse_documents
+  value: corp_enit_sandbox_catalog.data_classification_poc.doc_results
 - name: BATCH_INPUT_VOLUME_PATH
-  value: /Volumes/workspace/ai_parse_document_demo/ai_parse_document_app_workflow/inputs/
+  value: /Volumes/corp_enit_sandbox_catalog/data_classification_poc/data/
 - name: BATCH_JOB_NAME
   value: ai_parse_document_app_workflow
 runtime: python_3.10
